@@ -37,8 +37,4 @@ cd university-map
 
 # Create dependencies
 flutter pub get
-
-# Configure environment
-cp .env.example .env
-# Add your Mapbox access token to .env file
 ```
