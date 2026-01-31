@@ -27,7 +27,6 @@ Mobile application for university campus navigation using Flutter
 - Flutter SDK (>=3.0.0)
 - Dart (>=2.19.0)
 - Android Studio / Xcode (for emulation)
-- Mapbox Access Token
 
 ### Download
 ```bash
