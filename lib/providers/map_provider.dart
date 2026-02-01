@@ -1,95 +1,146 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
-
-// Временные модели
-class CampusLocation {
-  final double lat;
-  final double lng;
-  final String name;
-  final String? address;
-  
-  CampusLocation({
-    required this.lat,
-    required this.lng,
-    required this.name,
-    this.address,
-  });
-}
-
-class Building {
-  final String id;
-  final String name;
-  final String description;
-  final CampusLocation location;
-  
-  Building({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.location,
-  });
-}
+import 'package:flutter/services.dart';
+import '../models/campus_model.dart';
+import '../services/map_service.dart';
 
 class MapProvider with ChangeNotifier {
   List<Building> _buildings = [];
+  List<CampusRoute> _routes = [];
   bool _isLoading = false;
+  Building? _selectedBuilding;
+  CampusRoute? _activeRoute;
+  LatLngBounds? _visibleRegion;
+  
+  final MapService _mapService = MapService();
   
   List<Building> get buildings => _buildings;
+  List<CampusRoute> get routes => _routes;
   bool get isLoading => _isLoading;
+  Building? get selectedBuilding => _selectedBuilding;
+  CampusRoute? get activeRoute => _activeRoute;
+  LatLngBounds? get visibleRegion => _visibleRegion;
   
   Future<void> loadCampusData() async {
     _isLoading = true;
     notifyListeners();
     
     try {
-      // Демо данные
-      _buildings = [
-        Building(
-          id: '1',
-          name: 'Main Building',
-          description: 'Central administrative building',
-          location: CampusLocation(
-            lat: 13.736717,
-            lng: 100.523186,
-            name: 'Main Building',
-          ),
-        ),
-        Building(
-          id: '2',
-          name: 'Science Building',
-          description: 'Faculties of Science and Engineering',
-          location: CampusLocation(
-            lat: 13.736717 + 0.001,
-            lng: 100.523186 + 0.001,
-            name: 'Science Building',
-          ),
-        ),
-      ];
+      // Загружаем здания из JSON файла
+      final jsonString = await rootBundle.loadString('assets/data/campus_data.json');
+      final jsonData = json.decode(jsonString);
       
-      await Future.delayed(const Duration(seconds: 1)); // Имитация загрузки
+      // Парсим здания
+      final buildingsData = jsonData['buildings'] as List;
+      _buildings = buildingsData.map((buildingJson) {
+        return Building.fromJson(buildingJson);
+      }).toList();
+      
+      // Парсим маршруты
+      final routesData = jsonData['routes'] as List? ?? [];
+      _routes = routesData.map((routeJson) {
+        return CampusRoute.fromJson(routeJson);
+      }).toList();
+      
+      await Future.delayed(const Duration(milliseconds: 500));
       
     } catch (e) {
       if (kDebugMode) {
         print('Error loading campus data: $e');
       }
+      
+      // Запасной вариант через MapService
+      _buildings = await _mapService.getBuildings();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
   
-  // Упрощенный расчет расстояния
-  double _calculateDistance(CampusLocation a, CampusLocation b) {
-    // Простая формула для приблизительного расчета
-    final latDiff = (a.lat - b.lat).abs();
-    final lngDiff = (a.lng - b.lng).abs();
+  void selectBuilding(Building building) {
+    _selectedBuilding = building;
+    notifyListeners();
+  }
+  
+  void clearSelection() {
+    _selectedBuilding = null;
+    notifyListeners();
+  }
+  
+  void setActiveRoute(CampusRoute route) {
+    _activeRoute = route;
+    notifyListeners();
+  }
+  
+  void clearRoute() {
+    _activeRoute = null;
+    notifyListeners();
+  }
+  
+  void updateVisibleRegion(LatLngBounds bounds) {
+    _visibleRegion = bounds;
+    notifyListeners();
+  }
+  
+  Future<List<Building>> getBuildingsInRegion(LatLngBounds bounds) async {
+    return _buildings.where((building) {
+      final lat = building.location.lat;
+      final lng = building.location.lng;
+      return lat >= bounds.southwest!.latitude &&
+             lat <= bounds.northeast!.latitude &&
+             lng >= bounds.southwest!.longitude &&
+             lng <= bounds.northeast!.longitude;
+    }).toList();
+  }
+  
+  Future<CampusRoute> calculateRoute(
+    CampusLocation start,
+    CampusLocation end,
+    String transportMode,
+  ) async {
+    _isLoading = true;
+    notifyListeners();
     
-    // Приблизительно 111 км на градус широты
-    // и 111 * cos(широта) км на градус долготы
-    final distanceKm = sqrt(pow(latDiff * 111, 2) + pow(lngDiff * 111 * cos(a.lat * pi / 180), 2));
+    try {
+      final route = await _mapService.calculateRoute(
+        start,
+        end,
+        transportMode,
+      );
+      
+      _routes.add(route);
+      _activeRoute = route;
+      
+      return route;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+  
+  List<Building> searchBuildings(String query) {
+    if (query.isEmpty) return [];
     
-    return distanceKm * 1000; // Возвращаем в метрах
+    final lowercaseQuery = query.toLowerCase();
+    return _buildings.where((building) {
+      return building.name.toLowerCase().contains(lowercaseQuery) ||
+             building.description.toLowerCase().contains(lowercaseQuery) ||
+             (building.location.address?.toLowerCase().contains(lowercaseQuery) ?? false);
+    }).toList();
+  }
+  
+  // Добавляем поддержку LatLngBounds из mapbox_gl
+  class LatLngBounds {
+    final LatLng? northeast;
+    final LatLng? southwest;
+    
+    LatLngBounds({this.northeast, this.southwest});
+  }
+  
+  class LatLng {
+    final double latitude;
+    final double longitude;
+    
+    LatLng(this.latitude, this.longitude);
   }
 }
